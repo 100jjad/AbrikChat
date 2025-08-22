@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "290563297522",
+    "project_id": "abrikchat",
+    "storage_bucket": "abrikchat.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:290563297522:android:d36f27764fd6a61e0f006b",
+        "android_client_info": {
+          "package_name": "com.hoshco.abrikchat"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBbuglBoeRCXe-0qxipZWXs974D0f9e17I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
