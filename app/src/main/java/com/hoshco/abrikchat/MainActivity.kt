@@ -78,16 +78,36 @@ class MainActivity : AppCompatActivity() {
     private lateinit var digit3: EditText
     private lateinit var digit4: EditText
     private lateinit var smsReceiver: BroadcastReceiver
-    private val permissionsToRequest = listOf(
-        Manifest.permission.RECEIVE_SMS,
-        Manifest.permission.WRITE_EXTERNAL_STORAGE,
-        Manifest.permission.READ_EXTERNAL_STORAGE
-    )
+    private val permissionsToRequest: List<String> by lazy {
+        val permissions = mutableListOf(
+            Manifest.permission.RECEIVE_SMS,
+            Manifest.permission.RECORD_AUDIO
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // اندروید 13 و بالاتر
+            permissions.addAll(
+                listOf(
+                    Manifest.permission.READ_MEDIA_IMAGES,
+                    Manifest.permission.READ_MEDIA_VIDEO,
+                    Manifest.permission.READ_MEDIA_AUDIO
+                )
+            )
+        } else {
+            // اندروید 12 و پایین‌تر
+            permissions.addAll(
+                listOf(
+                    Manifest.permission.READ_EXTERNAL_STORAGE,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE
+                )
+            )
+        }
+        permissions
+    }
 
     private val SMS_PERMISSION_CODE = 100
     private val STORAGE_PERMISSION_CODE = 102
+    private val MICROPHONE_PERMISSION_CODE = 103
     private var isResendTimerRunning = false
-    //private var fileLoggingTree: CustomFileLoggingTree? = null
     private val wifiManager: WifiManager by lazy {
         applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
     }
@@ -331,14 +351,41 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkStoragePermission(): Boolean {
-        return ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) == PackageManager.PERMISSION_GRANTED &&
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED &&
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED &&
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        }
     }
 
     private fun requestStoragePermission() {
+        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            arrayOf(
+                Manifest.permission.READ_MEDIA_IMAGES,
+                Manifest.permission.READ_MEDIA_VIDEO,
+                Manifest.permission.READ_MEDIA_AUDIO
+            )
+        } else {
+            arrayOf(
+                Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            )
+        }
+        ActivityCompat.requestPermissions(this, permissions, STORAGE_PERMISSION_CODE)
+    }
+
+    private fun checkMicrophonePermission(): Boolean {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun requestMicrophonePermission() {
         ActivityCompat.requestPermissions(
             this,
-            arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
-            STORAGE_PERMISSION_CODE
+            arrayOf(Manifest.permission.RECORD_AUDIO),
+            MICROPHONE_PERMISSION_CODE
         )
     }
 
@@ -358,18 +405,30 @@ class MainActivity : AppCompatActivity() {
                 Timber.d("$permission اعطا شد")
             } else {
                 Timber.w("$permission رد شد")
-                Toast.makeText(
-                    this,
-                    when (permission) {
-                        Manifest.permission.RECEIVE_SMS -> "برای دریافت کد تأیید، دسترسی به پیامک لازم است"
-                        Manifest.permission.WRITE_EXTERNAL_STORAGE -> "برای ذخیره لاگ‌ها، دسترسی به حافظه لازم است"
-                        Manifest.permission.READ_EXTERNAL_STORAGE -> "برای خواندن لاگ‌ها، دسترسی به حافظه لازم است"
-                        else -> "دسترسی به $permission لازم است"
-                    },
-                    Toast.LENGTH_LONG
-                ).show()
+                // فقط برای مجوزهایی که در نسخه‌ی فعلی اندروید معتبر هستند پیام نمایش داده شود
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU &&
+                    (permission == Manifest.permission.READ_MEDIA_IMAGES ||
+                            permission == Manifest.permission.READ_MEDIA_VIDEO ||
+                            permission == Manifest.permission.READ_MEDIA_AUDIO)) {
+                    // برای اندروید 12 و پایین‌تر، پیام‌های مربوط به READ_MEDIA_* نمایش داده نشود
+                    Timber.d("Ignoring $permission rejection message on API < 33")
+                } else {
+                    Toast.makeText(
+                        this,
+                        when (permission) {
+                            Manifest.permission.RECEIVE_SMS -> "برای دریافت کد تأیید، دسترسی به پیامک لازم است"
+                            Manifest.permission.WRITE_EXTERNAL_STORAGE -> "برای ذخیره لاگ‌ها، دسترسی به حافظه لازم است"
+                            Manifest.permission.READ_EXTERNAL_STORAGE -> "برای خواندن لاگ‌ها، دسترسی به حافظه لازم است"
+                            Manifest.permission.RECORD_AUDIO -> "برای ضبط صدا، دسترسی به میکروفون لازم است"
+                            Manifest.permission.READ_MEDIA_IMAGES -> "برای دسترسی به تصاویر، مجوز لازم است"
+                            Manifest.permission.READ_MEDIA_VIDEO -> "برای دسترسی به ویدئوها، مجوز لازم است"
+                            Manifest.permission.READ_MEDIA_AUDIO -> "برای دسترسی به فایل‌های صوتی، مجوز لازم است"
+                            else -> "دسترسی به $permission لازم است"
+                        },
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             }
-            // درخواست مجوز بعدی
             requestPermissionsSequentially(permissionsToRequest, requestCode + 1)
         }
     }

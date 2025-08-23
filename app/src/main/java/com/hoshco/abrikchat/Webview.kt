@@ -1,7 +1,9 @@
 package com.hoshco.abrikchat
 
+import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
+import android.net.Uri
 import android.net.http.SslError
 import android.os.Build
 import android.os.Bundle
@@ -16,6 +18,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -26,6 +29,11 @@ class WebViewActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private var loadCount = 0
+    private var filePathCallback: ValueCallback<Array<Uri>>? = null
+    private val filePickerLauncher = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        filePathCallback?.onReceiveValue(uris.toTypedArray())
+        filePathCallback = null
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -120,6 +128,8 @@ class WebViewActivity : AppCompatActivity() {
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             blockNetworkLoads = false
             blockNetworkImage = false
+            allowFileAccessFromFileURLs = true
+            allowUniversalAccessFromFileURLs = true
         }
 
         webView.webChromeClient = object : WebChromeClient() {
@@ -139,6 +149,18 @@ class WebViewActivity : AppCompatActivity() {
             override fun onHideCustomView() {
                 window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
                 super.onHideCustomView()
+            }
+
+            override fun onShowFileChooser(
+                webView: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: FileChooserParams?
+            ): Boolean {
+                this@WebViewActivity.filePathCallback?.onReceiveValue(null)
+                this@WebViewActivity.filePathCallback = filePathCallback
+                val mimeTypes = fileChooserParams?.acceptTypes ?: arrayOf("*/*")
+                filePickerLauncher.launch(mimeTypes.joinToString(","))
+                return true
             }
         }
 
@@ -176,7 +198,7 @@ class WebViewActivity : AppCompatActivity() {
                             loadCount = 3
                             webView.loadUrl(url!!)
                             if (view != null) {
-                                Toast.makeText(this@WebViewActivity, "view.reload()", Toast.LENGTH_SHORT).show()
+                                //Toast.makeText(this@WebViewActivity, "view.reload()", Toast.LENGTH_SHORT).show()
                                 view.reload()
                             }
                         }, 2000)
@@ -286,5 +308,22 @@ class WebViewActivity : AppCompatActivity() {
         } else {
             super.onBackPressed()
         }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == FILE_REQUEST_CODE && filePathCallback != null) {
+            val result = if (resultCode == RESULT_OK && data != null) {
+                arrayOf(data.data ?: Uri.EMPTY)
+            } else {
+                null
+            }
+            filePathCallback?.onReceiveValue(result)
+            filePathCallback = null
+        }
+    }
+
+    companion object {
+        private const val FILE_REQUEST_CODE = 1
     }
 }
