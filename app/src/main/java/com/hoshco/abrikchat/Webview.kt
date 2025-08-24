@@ -186,7 +186,6 @@ class WebViewActivity : AppCompatActivity() {
                         webView.evaluateJavascript(jsCode, object : ValueCallback<String> {
                             override fun onReceiveValue(value: String?) {
                                 Log.d("WebView", "JS evaluation completed: $value")
-                                // لود دوم
                                 loadCount = 2
                                 webView.loadUrl(url!!)
                             }

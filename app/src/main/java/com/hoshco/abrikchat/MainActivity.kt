@@ -751,9 +751,11 @@ class MainActivity : AppCompatActivity() {
                 val sharedPreferences = getSecureSharedPreferences()
                 val savedPhoneNumber = sharedPreferences.getString("phone_number", null)
                 val savedDomain = sharedPreferences.getString("domain", null)
+                val savedHomepage = sharedPreferences.getString("homepage", null)
+                val fullUrl = savedDomain + savedHomepage
                 val savedAccessToken = getSharedPreferences("user_data", Context.MODE_PRIVATE).getString("access_token", null) // دریافت توکن ذخیره‌شده
-                if (savedPhoneNumber != null && savedDomain != null) {
-                    openNewPageWithLink(savedDomain, savedAccessToken!!)
+                if (savedPhoneNumber != null) {
+                    openNewPageWithLink(fullUrl, savedAccessToken!!)
                 } else {
                     showErrorMessage("خطا در ورود خودکار")
                 }
