@@ -27,9 +27,6 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
-import androidx.biometric.BiometricManager
-import androidx.biometric.BiometricPrompt
-import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
@@ -54,6 +51,7 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 import android.os.Environment
 import android.util.Log
+import androidx.constraintlayout.widget.ConstraintLayout
 import com.google.firebase.messaging.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import java.io.BufferedOutputStream
@@ -77,14 +75,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var digit2: EditText
     private lateinit var digit3: EditText
     private lateinit var digit4: EditText
-    private lateinit var smsReceiver: BroadcastReceiver
+    private var smsReceiver: BroadcastReceiver? = null // تغییر به nullable
     private val permissionsToRequest: List<String> by lazy {
         val permissions = mutableListOf(
             Manifest.permission.RECEIVE_SMS,
             Manifest.permission.RECORD_AUDIO
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            // اندروید 13 و بالاتر
             permissions.addAll(
                 listOf(
                     Manifest.permission.READ_MEDIA_IMAGES,
@@ -93,7 +90,6 @@ class MainActivity : AppCompatActivity() {
                 )
             )
         } else {
-            // اندروید 12 و پایین‌تر
             permissions.addAll(
                 listOf(
                     Manifest.permission.READ_EXTERNAL_STORAGE,
@@ -124,9 +120,26 @@ class MainActivity : AppCompatActivity() {
 
         // تنظیم Timber برای لاگ‌گیری
         setupLogging()
-
-        // تست لاگ
         Timber.d("برنامه شروع شد! این یه تست لاگه.")
+
+        // بررسی وجود اطلاعات کاربر برای ورود خودکار
+        if (isUserLoggedIn()) {
+            val sharedPreferences = getSecureSharedPreferences()
+            val savedPhoneNumber = sharedPreferences.getString("phone_number", null)
+            val savedDomain = sharedPreferences.getString("domain", null)
+            val savedHomepage = sharedPreferences.getString("homepage", null)
+            val savedAccessToken = getSharedPreferences("user_data", Context.MODE_PRIVATE).getString("access_token", null)
+            if (savedPhoneNumber != null && savedDomain != null && savedHomepage != null && savedAccessToken != null) {
+                val fullUrl = savedDomain + savedHomepage
+                Timber.d("User already logged in, redirecting to WebViewActivity with url: %s", fullUrl)
+                openNewPageWithLink(fullUrl, savedAccessToken)
+                finish() // بستن MainActivity
+                return
+            } else {
+                Timber.w("Stored credentials are incomplete, proceeding to login")
+                clearSharedPreferences() // پاک کردن اطلاعات ناقص
+            }
+        }
 
         // Initialize UI elements
         phoneNumberLayout = findViewById(R.id.phoneNumberLayout)
@@ -226,14 +239,18 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
 
-        // Check for biometric login
-        checkBiometricLogin()
+    private fun isUserLoggedIn(): Boolean {
+        val sharedPreferences = getSecureSharedPreferences()
+        return sharedPreferences.contains("phone_number") &&
+                sharedPreferences.contains("domain") &&
+                sharedPreferences.contains("homepage") &&
+                getSharedPreferences("user_data", Context.MODE_PRIVATE).contains("access_token")
     }
 
     private fun requestPermissionsSequentially(permissions: List<String>, index: Int = 0) {
         if (index >= permissions.size) {
-            // همه مجوزها درخواست شدن
             Timber.d("تمامی مجوزها درخواست شدند")
             return
         }
@@ -241,28 +258,23 @@ class MainActivity : AppCompatActivity() {
         if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, arrayOf(permission), index)
         } else {
-            // مجوز قبلاً داده شده، به سراغ مجوز بعدی می‌ریم
             Timber.d("$permission قبلاً اعطا شده است")
             requestPermissionsSequentially(permissions, index + 1)
         }
     }
 
     private fun setupLogging() {
-        // حذف لاگ‌های قبلی
         if (Timber.treeCount > 0) Timber.uprootAll()
 
         try {
-            // ایجاد لاگ‌های سیستمی
             startLogcatCapture()
         } catch (e: Exception) {
             Log.e("MainActivity", "Error starting logcat capture", e)
         }
 
         try {
-            // ایجاد لاگ‌های برنامه
             val logFile = getAppLogFile()
-            val outputStream = FileOutputStream(logFile)
-            // اضافه کردن خط اول
+            val outputStream = FileOutputStream(logFile, true) // true برای append mode
             outputStream.write("--- App Log Started at ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())} ---\n\n".toByteArray())
             fileLoggingTree = CustomFileLoggingTree(outputStream)
             Timber.plant(fileLoggingTree!!)
@@ -270,15 +282,12 @@ class MainActivity : AppCompatActivity() {
             Log.e("MainActivity", "Error creating app log file", e)
         }
 
-        // برای نمایش در Logcat
         if (BuildConfig.DEBUG) {
             Timber.plant(Timber.DebugTree())
         }
 
         try {
-            // تنظیم CrashHandler
             val crashLogFile = getCrashLogFile()
-            // اضافه کردن خط اول به فایل crash
             FileWriter(crashLogFile).use { writer ->
                 writer.write("--- Crash Log Started at ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())} ---\n\n")
             }
@@ -334,8 +343,22 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         stopLogcatCapture()
-        fileLoggingTree?.close()
-        unregisterReceiver(smsReceiver)
+        fileLoggingTree?.let {
+            try {
+                it.close()
+            } catch (e: IOException) {
+                Timber.e(e, "Error closing fileLoggingTree")
+            }
+            fileLoggingTree = null
+        }
+        smsReceiver?.let {
+            try {
+                unregisterReceiver(it)
+            } catch (e: IllegalArgumentException) {
+                Timber.e(e, "Error unregistering smsReceiver")
+            }
+            smsReceiver = null
+        }
     }
 
     private fun checkSmsPermission(): Boolean {
@@ -405,12 +428,10 @@ class MainActivity : AppCompatActivity() {
                 Timber.d("$permission اعطا شد")
             } else {
                 Timber.w("$permission رد شد")
-                // فقط برای مجوزهایی که در نسخه‌ی فعلی اندروید معتبر هستند پیام نمایش داده شود
                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU &&
                     (permission == Manifest.permission.READ_MEDIA_IMAGES ||
                             permission == Manifest.permission.READ_MEDIA_VIDEO ||
                             permission == Manifest.permission.READ_MEDIA_AUDIO)) {
-                    // برای اندروید 12 و پایین‌تر، پیام‌های مربوط به READ_MEDIA_* نمایش داده نشود
                     Timber.d("Ignoring $permission rejection message on API < 33")
                 } else {
                     Toast.makeText(
@@ -497,6 +518,7 @@ class MainActivity : AppCompatActivity() {
 
         val deviceInfo = DeviceInfo(
             deviceId = fetchDeviceId(),
+            //deviceId = "04203b2f2809d4d6",
             ip = getIpAddress(this@MainActivity, wifiManager)
         )
         val request = LoginRequest(formattedPhoneNumber, deviceInfo, verifyCode)
@@ -571,7 +593,6 @@ class MainActivity : AppCompatActivity() {
                 val deviceId = fetchDeviceId()
                 val request = FcmTokenRequest(fcmToken, deviceId)
                 val authHeader = "Bearer $accessToken"
-                // 🔹 لاگ بدنه JSON مشابه لاگ لاگین
                 val requestJson = Gson().toJson(request)
                 Timber.d("Sending FCM token request: %s", requestJson)
 
@@ -714,70 +735,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openNewPageWithLink(url: String, token: String) {
-        Timber.d("Login successful, opening WebViewActivity with url: %s", url)
+        Timber.d("Opening WebViewActivity with url: %s", url)
         val intent = Intent(this, WebViewActivity::class.java)
         intent.putExtra("url", url)
         intent.putExtra("token", token)
         startActivity(intent)
         Toast.makeText(this, "ورود موفق", Toast.LENGTH_SHORT).show()
-    }
-
-    private fun checkBiometricLogin() {
-        try {
-            if (isBiometricLoginEnabled() && checkBiometricAvailability()) {
-                showBiometricPrompt()
-            }
-        } catch (e: Exception) {
-            Timber.e(e, "Error in biometric login check")
-            showErrorMessage("خطا در بررسی ورود بیومتریک")
-        }
-    }
-
-    private fun isBiometricLoginEnabled(): Boolean {
-        return try {
-            getSecureSharedPreferences().getBoolean("biometric_enabled", false)
-        } catch (e: Exception) {
-            Timber.e(e, "Error in isBiometricLoginEnabled")
-            clearSharedPreferences()
-            false
-        }
-    }
-
-    private fun showBiometricPrompt() {
-        val executor = ContextCompat.getMainExecutor(this)
-        val biometricPrompt = BiometricPrompt(this, executor, object : BiometricPrompt.AuthenticationCallback() {
-            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                super.onAuthenticationSucceeded(result)
-                val sharedPreferences = getSecureSharedPreferences()
-                val savedPhoneNumber = sharedPreferences.getString("phone_number", null)
-                val savedDomain = sharedPreferences.getString("domain", null)
-                val savedHomepage = sharedPreferences.getString("homepage", null)
-                val fullUrl = savedDomain + savedHomepage
-                val savedAccessToken = getSharedPreferences("user_data", Context.MODE_PRIVATE).getString("access_token", null) // دریافت توکن ذخیره‌شده
-                if (savedPhoneNumber != null) {
-                    openNewPageWithLink(fullUrl, savedAccessToken!!)
-                } else {
-                    showErrorMessage("خطا در ورود خودکار")
-                }
-            }
-
-            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                super.onAuthenticationError(errorCode, errString)
-                showErrorMessage("خطا در تأیید اثر انگشت")
-            }
-        })
-
-        val promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle("ورود با اثر انگشت")
-            .setSubtitle("لطفا اثر انگشت خود را برای ورود تأیید کنید")
-            .setNegativeButtonText("انصراف")
-            .build()
-
-        biometricPrompt.authenticate(promptInfo)
-    }
-
-    private fun checkBiometricAvailability(): Boolean {
-        return BiometricManager.from(this).canAuthenticate() == BiometricManager.BIOMETRIC_SUCCESS
     }
 
     private fun storeCredentials(phoneNumber: String, domain: String, homepage: String) {
@@ -786,10 +749,9 @@ class MainActivity : AppCompatActivity() {
             putString("phone_number", phoneNumber)
             putString("domain", domain)
             putString("homepage", homepage)
-            putBoolean("biometric_enabled", true)
             apply()
         }
-        Timber.d("Stored: phone_number=%s, domain=%s, homepage=%s, biometric_enabled=true", phoneNumber, domain, homepage)
+        Timber.d("Stored: phone_number=%s, domain=%s, homepage=%s", phoneNumber, domain, homepage)
     }
 
     private fun getSecureSharedPreferences(): SharedPreferences {
@@ -827,13 +789,10 @@ class MainActivity : AppCompatActivity() {
     private fun startLogcatCapture() {
         try {
             val logcatFile = getLogcatFile()
-
-            // نوشتن خط اول در فایل logcat
             FileWriter(logcatFile).use { writer ->
                 writer.write("--- Logcat Capture Started at ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())} ---\n\n")
             }
 
-            // متوقف کردن فرآیند قبلی اگر وجود دارد
             logcatProcess?.destroy()
 
             val clearProcess = ProcessBuilder()
@@ -867,6 +826,7 @@ class MainActivity : AppCompatActivity() {
 class CustomFileLoggingTree(private val outputStream: OutputStream) : Timber.Tree() {
     private val buffer = BufferedOutputStream(outputStream)
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault())
+    private var isClosed = false
 
     init {
         try {
@@ -878,40 +838,47 @@ class CustomFileLoggingTree(private val outputStream: OutputStream) : Timber.Tre
     }
 
     override fun log(priority: Int, tag: String?, message: String, t: Throwable?) {
-        try {
-            val timeStamp = dateFormat.format(Date())
-            val priorityString = when (priority) {
-                Log.VERBOSE -> "V"
-                Log.DEBUG -> "D"
-                Log.INFO -> "I"
-                Log.WARN -> "W"
-                Log.ERROR -> "E"
-                Log.ASSERT -> "A"
-                else -> "?"
+        synchronized(this) {
+            if (isClosed) return
+            try {
+                val timeStamp = dateFormat.format(Date())
+                val priorityString = when (priority) {
+                    Log.VERBOSE -> "V"
+                    Log.DEBUG -> "D"
+                    Log.INFO -> "I"
+                    Log.WARN -> "W"
+                    Log.ERROR -> "E"
+                    Log.ASSERT -> "A"
+                    else -> "?"
+                }
+
+                val logMessage = "$timeStamp $priorityString/${tag ?: ""}: $message\n"
+                buffer.write(logMessage.toByteArray())
+
+                t?.let {
+                    buffer.write("Stack trace: ".toByteArray())
+                    buffer.write(it.stackTraceToString().toByteArray())
+                    buffer.write("\n".toByteArray())
+                }
+
+                buffer.flush()
+            } catch (e: Exception) {
+                Log.e("CustomFileLoggingTree", "Error writing to log file", e)
             }
-
-            val logMessage = "$timeStamp $priorityString/${tag ?: ""}: $message\n"
-            buffer.write(logMessage.toByteArray())
-
-            t?.let {
-                buffer.write("Stack trace: ".toByteArray())
-                buffer.write(it.stackTraceToString().toByteArray())
-                buffer.write("\n".toByteArray())
-            }
-
-            buffer.flush()
-        } catch (e: Exception) {
-            Log.e("CustomFileLoggingTree", "Error writing to log file", e)
         }
     }
 
     fun close() {
-        try {
-            buffer.flush()
-            buffer.close()
-            outputStream.close()
-        } catch (e: IOException) {
-            Log.e("CustomFileLoggingTree", "Error closing stream", e)
+        synchronized(this) {
+            if (isClosed) return
+            try {
+                buffer.flush()
+                buffer.close()
+                outputStream.close()
+                isClosed = true
+            } catch (e: IOException) {
+                Log.e("CustomFileLoggingTree", "Error closing stream", e)
+            }
         }
     }
 }

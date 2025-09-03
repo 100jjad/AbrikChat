@@ -29,6 +29,7 @@ class WebViewActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private var loadCount = 0
+    private var isInitialLoad = true // برای تشخیص لود اولیه
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private val filePickerLauncher = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         filePathCallback?.onReceiveValue(uris.toTypedArray())
@@ -158,8 +159,8 @@ class WebViewActivity : AppCompatActivity() {
             ): Boolean {
                 this@WebViewActivity.filePathCallback?.onReceiveValue(null)
                 this@WebViewActivity.filePathCallback = filePathCallback
-                val mimeTypes = fileChooserParams?.acceptTypes ?: arrayOf("*/*")
-                filePickerLauncher.launch(mimeTypes.joinToString(","))
+                // همیشه "*/*" استفاده کن تا همه فایل‌ها مجاز باشند
+                filePickerLauncher.launch("*/*")
                 return true
             }
         }
@@ -172,44 +173,24 @@ class WebViewActivity : AppCompatActivity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                Log.d("WebView", "Page finished: $url, loadCount: $loadCount")
+                Log.d("WebView", "Page finished: $url")
 
-                when (loadCount) {
-                    1 -> {
-                        // لود اول: تنظیم توکن و لود دوباره صفحه پس از اطمینان از اجرای JS
-                        val jsCode = """
-                            localStorage.clear();
-                            localStorage.setItem('token', '$token');
-                            localStorage.setItem('isAuthenticated', 'true');
-                            'done'; // بازگشت برای callback
-                        """.trimIndent()
-                        webView.evaluateJavascript(jsCode, object : ValueCallback<String> {
-                            override fun onReceiveValue(value: String?) {
-                                Log.d("WebView", "JS evaluation completed: $value")
-                                loadCount = 2
-                                webView.loadUrl(url!!)
-                            }
-                        })
-                    }
-                    2 -> {
-                        // لود دوم: تاخیر 2 ثانیه و سپس لود سوم
-                        webView.postDelayed({
-                            loadCount = 3
-                            webView.loadUrl(url!!)
-                            if (view != null) {
-                                //Toast.makeText(this@WebViewActivity, "view.reload()", Toast.LENGTH_SHORT).show()
-                                view.reload()
-                            }
-                        }, 2000)
-                    }
-                    3 -> {
-                        // لود سوم: تزریق CSS و نمایش با تاخیر 5 ثانیه
-                        injectFullscreenCSS()
-                        webView.postDelayed({
-                            webView.visibility = View.VISIBLE
-                            
-                        }, 5000)
-                    }
+                if (isInitialLoad) {
+                    // لود اولیه: تنظیم توکن و لود دوباره صفحه
+                    isInitialLoad = false
+                    val jsCode = """
+                        localStorage.clear();
+                        localStorage.setItem('token', '$token');
+                        localStorage.setItem('isAuthenticated', 'true');
+                    """.trimIndent()
+                    webView.evaluateJavascript(jsCode, null)
+                    // لود دوباره صفحه بدون تاخیر
+                    webView.loadUrl(url!!)
+                } else {
+                    // لود دوم: نمایش WebView
+                    webView.postDelayed({
+                        webView.visibility = View.VISIBLE
+                    }, 2000)
                 }
             }
 

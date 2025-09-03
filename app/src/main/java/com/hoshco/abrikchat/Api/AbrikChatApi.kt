@@ -23,7 +23,7 @@ interface AbrikChatApi {
 }
 
 object ApiClient {
-    private const val BASE_URL = "http://rdvs.abrik.cloud/api/"
+    private const val BASE_URL = "https://chat.abrik.cloud/api/"
 
     private val retrofit: Retrofit by lazy {
         Retrofit.Builder()

@@ -47,7 +47,10 @@
         </activity>
 
 
-        <activity android:name=".WebViewActivity"/>
+        <activity android:name=".WebViewActivity"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.AppCompat.NoActionBar"/>
+
 
         <receiver android:name=".SmsReceiver" android:exported="true">
             <intent-filter>
